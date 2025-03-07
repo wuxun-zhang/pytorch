@@ -158,6 +158,8 @@ class FxCompileMode(enum.Enum):
     # For testing - use the serde FxCompile scheme to debug serialization and
     # deserialization of GraphMoule and CompiledFxGraph.
     SERIALIZE = 1
+    # for custom FxCompile implementation
+    CUSTOM = 2
 
 
 def _fx_compile_mode_default() -> FxCompileMode:
@@ -868,6 +870,23 @@ class FxCompile(ABC):
     ) -> OutputCode: ...
 
 
+custom_fx_compile: dict[str, FxCompile] = {}
+
+def register_custom_fx_compile(device_options: Union[str, list[str]], registry=None) -> None:
+    def decorator(fx_compile_cls: FxCompile) -> FxCompile:
+        nonlocal registry
+        if registry is None:
+            registry = custom_fx_compile
+        if isinstance(device_options, str):
+            registry[device_options] = fx_compile_cls()
+        else:
+            for device in device_options:
+                registry[device] = fx_compile_cls()
+        return fx_compile_cls()
+
+    return decorator
+
+
 class _InProcessFxCompile(FxCompile):
     @override
     def codegen_and_compile(
@@ -1448,6 +1467,17 @@ def fx_codegen_and_compile(
         scheme = _InProcessFxCompile()
     elif fx_compile_mode == FxCompileMode.SERIALIZE:
         scheme = _DebugSerdeFxCompile()
+    elif fx_compile_mode == FxCompileMode.CUSTOM and custom_fx_compile:
+        # get device type from example_inputs or gm
+        if example_inputs:
+            tgt_device = example_inputs[0].device.type
+        else:
+            # TODO: get device info from nodes inside graph module
+            pass
+        if tgt_device not in custom_fx_compile:
+            # target device not register custom FxCompile
+            raise NotImplementedError
+        scheme = custom_fx_compile[tgt_device]
     else:
         raise NotImplementedError
 
