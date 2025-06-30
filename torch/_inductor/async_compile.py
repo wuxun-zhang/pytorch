@@ -217,6 +217,8 @@ class CompiledTritonKernels:
 
 
 class AsyncCompile:
+    # Wuxun: AsyncCompile is used to compile given source codes into
+    # corresponding binaries.
     def __init__(self) -> None:
         pass
 

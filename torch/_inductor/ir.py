@@ -801,6 +801,8 @@ class Operation:
         return False
 
     def get_read_writes(self) -> dependencies.ReadWrites:
+        # wuxun: query dependency of this operation, such as producer and
+        # consumers.
         raise NotImplementedError
 
     def is_user_of(self, name: str) -> bool:
@@ -4851,6 +4853,8 @@ class CppTemplateBuffer(TemplateBuffer):
 
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
+    # wuxun: base class for external kernels
+    # inputs are expected to be a list of IRNodes which are read by current op.
     inputs: list[Buffer]
 
     def get_read_writes(self) -> dependencies.ReadWrites:
@@ -5114,6 +5118,7 @@ class ExternKernel(InputsKernel):
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
+    # wuxun: a output buffer mutating a existing buffer
     mutation_outputs: list[MutationOutput] = dataclasses.field(default_factory=list)
 
     def __init__(  # type: ignore[no-untyped-def]

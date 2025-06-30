@@ -288,6 +288,9 @@ def mark_nodes_dislike_padding(
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: list[ir.IRNode]
 
+    # Wuxun: GraphLowering inherited from torch.fx.Interpreter will have
+    # capability of traversing graph nodes and constructing Inductor IR graph.
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -312,6 +315,8 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
+        # wuxun: whether to do layout optimization, typically for conv nodes
+        # choose channel last or channels first format.
         self.layout_opt = (
             layout_opt
             if layout_opt is not None
@@ -327,6 +332,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.inputs_to_check = inputs_to_check
 
         self.extra_traceback = False  # we do our own error wrapping
+
+        # wuxun: ShapeEnv is used to manage symbolic shape execution, record the
+        # mapping of symbol to known constants, and mantain shape guards (used 
+        # to decide if a recompilation is needed for new incoming shapes). It
+        # will also simplify the symbolic expression.
+        #
+        # There are also runtime asserts, typically for unbacked symbols (do not
+        # have a static value). Also track shape contrsints between dimensions.
+
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -1101,6 +1115,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_input_names.append(target)
             return gen
 
+        # wuxun: below codes process for the case where placeholder node is a
+        # tensor, need to create a InputBuffer.
+
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -1125,6 +1142,9 @@ class GraphLowering(torch.fx.Interpreter):
             )
         else:
             # TODO(jansel): handle input aliasing
+            # wuxun: create a InputBuffer for the placeholder node with fixed
+            # layout. The graph input tensors are usually provided by users and
+            # the layout is fixed.
             tensor = TensorBox.create(
                 InputBuffer(
                     name=target,
@@ -1135,6 +1155,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
+
+        # wuxun：record the mapping from device to node.
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 
@@ -1158,6 +1180,8 @@ class GraphLowering(torch.fx.Interpreter):
     def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
+
+        # wuxun: for each op, call registered lowering function
 
         # hasattr on OpOverloadPacket is slow, check isinstance first
         if not isinstance(target, torch._ops.OpOverloadPacket) and hasattr(
@@ -1250,12 +1274,15 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
+            # wuxun: execute lowering function
+            # these will be recorded into IR graph, including node, buffers, etc
             out = lowerings[target](*args, **kwargs)  # type: ignore[index]
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
                 # if they do, and if the target is mutable, then we need to
                 # write the new values back into the original inputs.
+                # wuxun: add copy_ to handle input mutation
                 self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
 
             return out
@@ -1304,6 +1331,7 @@ class GraphLowering(torch.fx.Interpreter):
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
         ):
+            # wuxun: handle constant tensors, add constant buffer to graph
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
@@ -1355,6 +1383,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
+        # wuxun: V.graph.current_node is the node being currently interpreted.
         fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
@@ -2285,6 +2314,7 @@ class GraphLowering(torch.fx.Interpreter):
             return self._compile_to_module()
 
     def _compile_to_module(self) -> CompiledModule:
+        # wuxun: compile to module is the main entry point for the codegen.
         # If we're here, we don't have to worry about the kernel code, which is only
         # returned separately in AOTInductor mode.
         wrapper_code, _ = (

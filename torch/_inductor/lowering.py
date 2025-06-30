@@ -2482,6 +2482,8 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+# wuxun: define constaint rule for sdpa node. if constraint satisfied, it will
+# fall back to eager execution.
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 

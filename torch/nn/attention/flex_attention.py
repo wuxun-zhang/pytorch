@@ -175,6 +175,8 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
 def _dense_to_ordered(dense_mask) -> tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
+    # Wuxun: indices of computed blocks in each row, for those masked-out blocks, they
+    # will be sorted to the end of the row. 
     col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
         num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
@@ -183,6 +185,8 @@ def _dense_to_ordered(dense_mask) -> tuple[Tensor, Tensor]:
 
 
 def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
+    # Wuxun: num_blocks_in_row: [B, H, Q_BLOCK_SIZE]
+    # col_indices: [ROWS, MAX_BLOCKS_IN_COL]
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
 
@@ -887,6 +891,9 @@ def create_block_mask(
         )
 
     mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
+    # Wuxun: separate partially compute blocks and fully compute blocks
+    # for full blocks, no need to compute mask for each score value which can
+    # save a lot of compute time.
     partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,

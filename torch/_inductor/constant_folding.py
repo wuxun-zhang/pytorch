@@ -382,6 +382,7 @@ def run_and_get_constant_graph(
     node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     output_nodes = []
     for node in gm.graph.nodes:
+        # wuxun: only process CONST_MODULE_TAG nodes
         if node.meta[META_TAG] == MODULE_TAG:
             continue
 

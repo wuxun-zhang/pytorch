@@ -1130,6 +1130,10 @@ class _InProcessFxCompile(FxCompile):
             # structured logs...
             # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
+            # wuxun: get shape_env from example inputs by 1) using fake tensor
+            # from example inputs (fake tensor), 2) global shape_env from TracingContext
+            # or existing dispatch mode.
+            # 
             shape_env = shape_env_from_inputs(example_inputs)
 
             # Convert view to reshape in the graph. This is necessary primarily for
@@ -1157,6 +1161,9 @@ class _InProcessFxCompile(FxCompile):
                 # we're in inductor, we assume that AOTAutograd has already "taken care"
                 # of autograd, so there should be no more autograd-related API's in the
                 # graph.
+                # wuxun: AOT autograd will firstly functionalize the graph, and
+                # and then generate fwd and bwd graph separately. Finally, fwd
+                # and bwd graph will be compiled by Inductor separately.
                 with torch.no_grad():
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
@@ -1175,6 +1182,10 @@ class _InProcessFxCompile(FxCompile):
                     print_output=False, include_stride=True, include_device=True
                 ),
             )
+            # Wuxun: V is used to manage thread-local global states, for example
+            # set temporary contexts, fake mode, ops handler.
+            # Change behavior of ops, not need explicitly pass node to functions
+            # set graph handler
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
                 cuda_context = get_cuda_device_context(gm)

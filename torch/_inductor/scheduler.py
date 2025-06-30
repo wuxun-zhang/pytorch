@@ -2189,6 +2189,7 @@ class Scheduler:
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             return SchedulerNode(self, node)
         elif isinstance(node, ir.ExternKernel):
+            # wuxun: create schedulerNodel for ExternalKernel
             return ExternKernelSchedulerNode(self, node)
         else:
             raise NotImplementedError(node)
@@ -3337,6 +3338,20 @@ class Scheduler:
 
         from .codegen.wrapper import buffer_reuse_key
 
+        """ wuxun
+        Considering such an example:
+
+                tensor_A
+                    |
+                   relu    tensor_B
+                    \      /
+                       mul
+                        |
+                    tensor_C
+
+        If we fuse the relu and mul, we will have to allocate a new buffer for tensor_C, while if separate these two nodes, tensor_A may be reused for tensor_C, which can save some memory.
+        """
+
         def _find_single_user_inputs(
             node: BaseSchedulerNode,
         ) -> list[ir.Buffer]:
@@ -3354,11 +3369,14 @@ class Scheduler:
         lhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in lhs_dep_nodes)
         rhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in rhs_dep_nodes)
 
+        # wuxun: find comman buffers with same storage size
         common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
 
         memory_overhead = 0
         for key in common_reuse_keys:
             try:
+                # wuxun: common buffer but cannot be reused is considered as
+                # memory overhead
                 memory_overhead += int(key[2])
             except ValueError:
                 # not an interger. Fallback is to fuse
@@ -4042,6 +4060,7 @@ class Scheduler:
     def get_backend(self, device: Optional[torch.device]) -> BaseScheduling:
         assert device is not None
         if device not in self.backends:
+            # wuxun: create device scheduling backend
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
