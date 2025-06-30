@@ -472,6 +472,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name: dict[str, str] = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
+
+        # wuxun: initialize backend registration, add WrapperCodeGen and Scheduling specific for each device
         init_backend_registration()
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
@@ -1618,6 +1620,7 @@ class GraphLowering(torch.fx.Interpreter):
                     result = super().run_node(n)
             else:
                 debug("")
+                # wuxun: run lowerings for node
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
@@ -1640,14 +1643,19 @@ class GraphLowering(torch.fx.Interpreter):
                 user.target in as_strided_ops for user in n.users
             )
 
+            # wuxun: force tensor to be materialized with specified strides
             if n.meta.get("inductor_realize_to_strides", False) and isinstance(
                 result, TensorBox
             ):
+                # wuxun: materialize result tensor (output to memory)
+                # it will also stop more nodes from fusing into it.
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
                 if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
+                    # wuxun: insert ir node of reordering op
+                    # accumulate ir node to previous nodes
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
                 is_output
@@ -1655,6 +1663,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and isinstance(result.data, ir.BaseView)
             ):
                 # Realize so that outputs are correctly aliased
+                # wuxun: hanlde output view tensor
                 result.realize()
 
             if (is_output or is_input_for_as_strided) and isinstance(
@@ -1770,9 +1779,20 @@ class GraphLowering(torch.fx.Interpreter):
                             )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
+                            # wuxun: materilize tensor if it's produced by a
+                            # pointwise or reduction node.
+                            # force computation to happen, and store to memory
+                            # with specific layout
                             result.realize()
 
                 # TODO(jansel): introduce a store vs inline choice
+                # wuxun:
+                # store - materialize the result tensor to memory, this
+                #  memory could be read by multiple subsequent nodes. This may
+                #  increase memory usage, but it's more efficient when computation
+                #  is expensive such as matmul.
+                # inline - compute each time, this should be more efficient if
+                #  computation is trivial and also can reduce memory usage.
                 result.mark_reuse(len(n.users))
 
             # Realize if the IRNode already has accumulated lots of reads
@@ -1788,6 +1808,10 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
+                    # wuxun: inner_fn represets all expressions in current node
+                    # 1) for complex node, recomputing is expensive so materializing to memory is better
+                    # 2) less benefits from fusion
+                    # 3) 
                     if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 

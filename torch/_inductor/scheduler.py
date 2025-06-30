@@ -312,6 +312,7 @@ class BaseSchedulerNode:
     ) -> None:
         used_buffers = self.used_or_aliased_buffer_names()
         used_buffers = OrderedSet(mutation_real_name.get(k, k) for k in used_buffers)
+        # wuxun: filter out those buffers that are still used by subsquent nodes
         self.last_usage = used_buffers - future_used_buffers
 
     def mark_run(self) -> None:
@@ -2041,6 +2042,7 @@ class Scheduler:
             ]
         )
 
+        # wuxun: create SchedulerNode for each node in the graph
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2621,6 +2623,8 @@ class Scheduler:
                     i + 1,
                     old_len,
                 )
+                # wuxun: fuse node starts here
+                # fuse one node each time.
                 nodes = self.fuse_nodes_once(nodes)
                 new_len = len(nodes)
                 fusion_log.debug(
@@ -3250,6 +3254,9 @@ class Scheduler:
                 continue
             for buf in node.used_buffer_names():
                 buffer_names_grouping[buf].append(node)
+        # wuxun: construct a mapping from buffer name to nodes that use it (consume or produce)
+        # for those nodes which produce or consume the same buffer, they can be
+        # potentially fused together (possible_fusions).
         for node_grouping in buffer_names_grouping.values():
             check_all_pairs(node_grouping)
 
@@ -3628,6 +3635,7 @@ class Scheduler:
         single fused node.
         """
 
+        # wuxun: core logic to determine if two nodes can be fused
         if node1 is node2:
             return False
 
@@ -3739,6 +3747,7 @@ class Scheduler:
             return False
         del device2
 
+        # wuxun: total memory size which can be saved by fusion
         shared_data_score = self.score_fusion_memory(node1, node2)
         if (
             shared_data_score < config.score_fusion_memory_threshold
@@ -3983,9 +3992,21 @@ class Scheduler:
         """
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
+        # wuxun: find last usage buffers for each node, after this node executed,
+        # these buffers can be freed and reused for other buffer allocation.
 
         future_used_buffers = OrderedSet(V.graph.get_output_names())
 
+        # wuxun: traversing in reverse order
+        #
+        # considering such a graph `node1 -> node2 -> node3 -> output`,
+        #  1) `future_used_buffers` is for buffers as graph outputs such as `buffer1`,
+        # node3 read/write buffers are [buffer_3, buffer2, buffer1]
+        #  2) node3 last usage will be [buffer_3, buffer2] and also update to
+        # `future_used_buffers` ([buffer3, buffer2]);
+        #  3) node1 read/write buffers are [buffer4, buffer3], so node1 last usage
+        # will be [buffer4].
+        #
         for node in reversed(self.nodes):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
             future_used_buffers.update(node.last_usage)
@@ -4730,6 +4751,7 @@ class Scheduler:
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
 
+            # wuxun: during codegen, update node last usage to buffer_names_to_free
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():
@@ -4772,6 +4794,8 @@ class Scheduler:
                     and device.type != "meta"
                     and self.get_backend(device).ready_to_flush()
                 ):
+                    # wuxun: flush codegen for each node, BTW free buffers that
+                    # no longer needed.
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):

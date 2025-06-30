@@ -156,7 +156,7 @@ To model this in Inductor, the IR distinguishes between TensorBox, View, Storage
 TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
 output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
 reference View IR or directly reference StorageBox IRs.
-
+    
 Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
 may take an existing TensorBox and point it to a new underlying View IR.
 
@@ -2788,6 +2788,8 @@ class ExpandView(BaseView):
     def create(cls, x, new_size):  # type: ignore[no-untyped-def]
         new_size = cls._normalize_size(x, new_size)
 
+        # wuxun: this is an optimization, if available directly manipulate
+        # storage layout to represent view tensor.
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             skip = len(new_size) - len(old_layout.size)
@@ -2865,6 +2867,7 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
+    # wuxun: reindexer maps from new index to old index
     def make_reindexer(self):  # type: ignore[no-untyped-def]
         inv = {j: i for i, j in enumerate(self.dims)}
         inv = [inv[i] for i in range(len(self.dims))]
@@ -2924,6 +2927,7 @@ class SqueezeView(BaseView):
 
         def reindex(index: list[sympy.Expr]) -> tuple[sympy.Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
+            # wuxun: use sympy.S.Zero to represent squeezed dimensions
             new_index = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
@@ -3439,6 +3443,7 @@ class Layout(OutputSpec):
         stride: Optional[list[Expr]] = None,
         offset: Expr = Integer(0),
     ) -> None:
+        # wuxun: layout is represented by size, stride and offset, etc
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
         self.device = device
