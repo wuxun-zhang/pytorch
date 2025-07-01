@@ -121,6 +121,7 @@ class SchedulerBuffer:
 
     def allocate(self) -> None:
         assert self.node is not None
+        # wuxun: skip codegen allocation
         if not self.node.should_allocate():
             return
 

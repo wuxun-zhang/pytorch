@@ -2276,10 +2276,19 @@ class GraphLowering(torch.fx.Interpreter):
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
             self.init_wrapper_code()
 
+            # wuxun: set scheduler during GraphLowering codegen called, at this
+            # time those optimizations are applied.
+            # 
+            # dump pre_fusion IR
+            #  topological sort
+            #  node fusion
+            #  loop reordering
+            # dump post_fusion IR
             self._update_scheduler()
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
             self.wrapper_code.push_codegened_graph(self)
+            # wuxun: trigger scheduler codegen
             self.scheduler.codegen()
 
             log.debug(

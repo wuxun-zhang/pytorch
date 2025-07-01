@@ -333,6 +333,7 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
+        # wuxun: record reuse global state
         self.reuse_pool: dict[ReuseKey, list[FreeIfNotReusedLine]] = (
             collections.defaultdict(list)
         )
@@ -595,6 +596,7 @@ class AllocateLine(MemoryPlanningLine):
             return NullLine(self.wrapper)
 
         # try to reuse a recently freed buffer
+        # wuxun: reuse decision
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)

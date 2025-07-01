@@ -1908,6 +1908,8 @@ class ExternKernelCaller(ChoiceCaller):
             inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
+            # wuxun: create an ExternKernelAlloc or ExternKernelOut node
+            # difference is that the former is for out variant.
             inner = cls(
                 layout=self.layout,
                 inputs=self.input_nodes,

@@ -5940,6 +5940,10 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_extern_kernel_out(self)
 
+    # wuxun: difference against ExternKernel
+    # 1) for .out variant kernel
+    # 2) write results to pre-existing buffer (managed by Inductor)
+
     def __init__(  # type: ignore[no-untyped-def]
         self,
         layout,
@@ -5964,6 +5968,7 @@ class ExternKernelOut(ExternKernel):
             ordered_kwargs_for_cpp_kernel,
             op_overload,
         )
+        # wuxun: register self as a operation into GraphLowering
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -5994,6 +5999,10 @@ class RandomSeeds(ExternKernelOut):
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_extern_kernel_alloc(self)
+
+    # wuxun:
+    # 1) do not alloc buffer, instead kernel is responsible for allocating
+    # buffer internally
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
